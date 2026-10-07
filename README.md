@@ -56,6 +56,9 @@ Moving calibration references changes numeric values while keeping the drawn poi
 | Magnifier | Always on, hold Ctrl / Command, or off |
 | Undo / redo | Ctrl / Command + Z; Shift + Z to redo |
 | Delete selected point | Delete / Backspace |
+| Select several points | Hold Shift and left-drag a selection box; Shift-click toggles individual points |
+| Move selected points together | Release Shift, then drag any selected point |
+| Paste an image | Ctrl / Command + V, with an image on the clipboard |
 | Deselect / cancel trace | Escape |
 
 ## Static hosting

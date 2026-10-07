@@ -142,3 +142,64 @@ test('dense point hit areas select and move the closest anchor', async ({ page }
   expect(after.points[20].y).toBeCloseTo(target.y + .03, 2);
   expect(after.points[21]).toEqual(before.points[21]);
 });
+
+test('Shift box selection moves a group and its handles together, with undo and bounds', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('image-input').setInputFiles(await imageFile(page));
+  await page.getByRole('button', { name: 'Pen', exact: true }).click();
+  for (const x of [.2, .5, .8]) await move(page, await position(page, x, .5), await position(page, x + .04, .46));
+  const original = await saveProject(page);
+  await page.keyboard.press('Escape');
+  await page.keyboard.down('Shift');
+  await move(page, await position(page, .15, .4), await position(page, .55, .6));
+  await page.keyboard.up('Shift');
+  await expect(page.getByText('2 points selected', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('selection-box')).toHaveCount(0);
+  await move(page, await position(page, .2, .5), await position(page, .3, .6));
+  const moved = await saveProject(page);
+  expect(moved.points).toHaveLength(3);
+  for (let i = 0; i < 2; i++) {
+    expect(moved.points[i].x - original.points[i].x).toBeCloseTo(.1, 2);
+    expect(moved.points[i].y - original.points[i].y).toBeCloseTo(.1, 2);
+    expect(moved.points[i].incoming.x - original.points[i].incoming.x).toBeCloseTo(.1, 2);
+    expect(moved.points[i].outgoing.y - original.points[i].outgoing.y).toBeCloseTo(.1, 2);
+  }
+  expect(moved.points[2]).toEqual(original.points[2]);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  expect((await saveProject(page)).points).toEqual(original.points);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  expect((await saveProject(page)).points).toEqual(moved.points);
+  await move(page, await position(page, moved.points[1].x, moved.points[1].y), await position(page, 1.05, moved.points[1].y));
+  const bounded = await saveProject(page);
+  expect(bounded.points[1].x).toBeCloseTo(1, 5);
+  expect(bounded.points[1].x - bounded.points[0].x).toBeCloseTo(moved.points[1].x - moved.points[0].x, 5);
+  await page.keyboard.press('Delete');
+  expect((await saveProject(page)).points).toEqual([original.points[2]]);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  expect((await saveProject(page)).points).toEqual(bounded.points);
+});
+
+test('Ctrl+V pastes an image, preserves points, and leaves text inputs alone', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/');
+  await page.getByTestId('data-input').setInputFiles({ name: 'curve.txt', mimeType: 'text/plain', buffer: Buffer.from('100 80\n1000 90\n10000 70') });
+  const before = await saveProject(page);
+  const file = await imageFile(page);
+  await page.evaluate(async data => {
+    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
+  }, file.buffer.toString('base64'));
+  await page.getByRole('button', { name: 'Trace', exact: true }).click();
+  await page.getByLabel('Y offset', { exact: true }).focus();
+  await page.keyboard.press('Control+v');
+  await expect(page.getByRole('status')).toContainText('Opened');
+  const pasted = await saveProject(page);
+  expect(pasted.image.width).toBe(1000); expect(pasted.image.height).toBe(620);
+  expect(pasted.points).toEqual(before.points);
+  await page.evaluate(() => navigator.clipboard.writeText('12'));
+  await page.getByLabel('Y offset', { exact: true }).focus();
+  await page.getByLabel('Y offset', { exact: true }).selectText();
+  await page.keyboard.press('Control+v');
+  await page.getByLabel('Y offset', { exact: true }).press('Enter');
+  await expect(page.getByLabel('Y offset', { exact: true })).toHaveValue('12');
+});

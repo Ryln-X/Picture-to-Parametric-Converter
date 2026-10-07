@@ -43,3 +43,5 @@
 [data-theme="dark"] .calibration-lines rect{fill:#27322b}
 [data-theme="dark"] .calibration-lines text{fill:#e4ba9b}
 [data-theme="dark"] .reference-x text{fill:#a6d2d4}
+
+.group-selection{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;padding-bottom:12px}

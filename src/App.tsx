@@ -8,7 +8,7 @@ import type { TraceOptions } from './tracing';
 
 type Mode = 'trace' | 'calibrate' | 'preview' | 'data';
 type Tool = 'points' | 'pen' | 'select' | 'pan' | 'pick';
-type Drag = { kind: 'point' | 'pen' | 'handle' | 'anchor' | 'pan' | 'image'; id?: string; axis?: 'xAxis' | 'yAxis'; handle?: 'incoming' | 'outgoing'; start: XY; point?: Point; view?: XY; image?: XY };
+type Drag = { kind: 'point' | 'pen' | 'handle' | 'anchor' | 'pan' | 'image' | 'selection'; id?: string; axis?: 'xAxis' | 'yAxis'; handle?: 'incoming' | 'outgoing'; start: XY; end?: XY; point?: Point; originals?: Point[]; ids?: string[]; view?: XY; image?: XY };
 const imageAccept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif';
 
 export default function App() {
@@ -21,7 +21,9 @@ export default function App() {
   });
   const history = useHistory(defaultProject()), project = history.value;
   const [mode, setMode] = useState<Mode>('trace'), [tool, setTool] = useState<Tool>('points');
-  const [selected, setSelected] = useState<string | null>(null), [autoInsert, setAutoInsert] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]), [autoInsert, setAutoInsert] = useState(true);
+  const [marquee, setMarquee] = useState<{ start: XY; end: XY } | null>(null);
+  const setSelected = (id: string | null) => setSelectedIds(id ? [id] : []);
   const [zoom, setZoom] = useState(1), [view, setView] = useState<XY>({ x: 0, y: 0 });
   const [canvasScale, setCanvasScale] = useState(1);
   const [cursor, setCursor] = useState<XY | null>(null), [ctrl, setCtrl] = useState(false), [space, setSpace] = useState(false);
@@ -36,7 +38,9 @@ export default function App() {
   const imageInput = useRef<HTMLInputElement>(null), dataInput = useRef<HTMLInputElement>(null), projectInput = useRef<HTMLInputElement>(null);
   const traceWorker = useRef<Worker | null>(null), toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const width = 1000, height = project.image ? width * project.image.height / project.image.width : 620;
-  const currentPoint = project.points.find(p => p.id === selected);
+  const selectedSet = new Set(selectedIds);
+  const selectedPoints = project.points.filter(p => selectedSet.has(p.id));
+  const currentPoint = selectedPoints.length === 1 ? selectedPoints[0] : undefined;
   const invalidAxes = axisError(project.xAxis) || axisError(project.yAxis);
   const drawingPath = pathData(project.points, project.interpolation, width, height);
   const notify = (message: string) => {
@@ -48,8 +52,8 @@ export default function App() {
   const setAxis = (axis: 'xAxis' | 'yAxis', value: Project[typeof axis]) => update(p => ({ ...p, [axis]: value }));
   const resetView = () => { setZoom(1); setView({ x: 0, y: 0 }); };
   const removeSelected = () => {
-    if (!selected) return;
-    update(p => ({ ...p, points: p.points.filter(point => point.id !== selected) })); setSelected(null);
+    if (!selectedPoints.length) return;
+    update(p => ({ ...p, points: p.points.filter(point => !selectedSet.has(point.id)) })); setSelected(null);
   };
 
   useEffect(() => {
@@ -68,10 +72,10 @@ export default function App() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); cancelTrace(); history.redo(); }
       else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSelected(); }
       else if (e.key === 'Escape') { cancelTrace(); setSelected(null); setAlignImage(false); setResetConfirm(false); }
-      else if (e.key.toLowerCase() === 'p') setTool('pen');
-      else if (e.key.toLowerCase() === 'd') setTool('points');
-      else if (e.key.toLowerCase() === 'v') setTool('select');
-      else if (e.key.toLowerCase() === 'h') setTool('pan');
+      else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'p') setTool('pen');
+      else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'd') setTool('points');
+      else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'v') setTool('select');
+      else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'h') setTool('pan');
     };
     const up = (e: KeyboardEvent) => { setCtrl(e.ctrlKey || e.metaKey); if (e.code === 'Space') setSpace(false); };
     const blur = () => { setCtrl(false); setSpace(false); };
@@ -121,6 +125,17 @@ export default function App() {
     } catch (error) { notify(error instanceof Error ? error.message : 'This image could not be opened.'); }
     finally { setBusy(false); }
   }
+  useEffect(() => {
+    const paste = (event: ClipboardEvent) => {
+      if (busy) return;
+      const image = Array.from(event.clipboardData?.items ?? []).find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile();
+      if (!image) return;
+      event.preventDefault();
+      void openImage(image);
+    };
+    window.addEventListener('paste', paste);
+    return () => window.removeEventListener('paste', paste);
+  }, [busy]);
   async function openData(file: File) {
     setBusy(true); cancelTrace();
     try {
@@ -203,16 +218,22 @@ export default function App() {
     cancelTrace(); history.begin(); drag.current = next;
   };
   const pointDown = (e: ReactPointerEvent, point: Point) => {
-    if (space || tool === 'pan' || alignImage || tool === 'pick') return;
+    if (e.button !== 0 || e.shiftKey || space || tool === 'pan' || alignImage || tool === 'pick') return;
     const at = coords(e);
     const distance = (candidate: Point) => Math.hypot((candidate.x - at.x) * width, (candidate.y - at.y) * height);
     // Overlapping hit areas should select the nearest point, not the last SVG element.
     const nearest = project.points.reduce((best, candidate) => distance(candidate) < distance(best) ? candidate : best, point);
-    setSelected(nearest.id); capture(e, { kind: 'point', id: nearest.id, point: nearest, start: at });
+    const originals = selectedSet.has(nearest.id) ? selectedPoints : [nearest];
+    if (!selectedSet.has(nearest.id)) setSelected(nearest.id);
+    capture(e, { kind: 'point', id: nearest.id, point: nearest, originals, start: at });
   };
   const stageDown = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (e.button !== 0 && e.button !== 1) return;
     const at = coords(e);
+    if (e.button === 0 && e.shiftKey && !space && !alignImage && mode !== 'calibrate') {
+      capture(e, { kind: 'selection', start: at, end: at, ids: selectedIds });
+      setMarquee({ start: at, end: at }); return;
+    }
     if (space || tool === 'pan' || e.button === 1) { capture(e, { kind: 'pan', start: { x: e.clientX, y: e.clientY }, view }); return; }
     if (alignImage && project.image) { capture(e, { kind: 'image', start: at, image: { x: project.image.x, y: project.image.y } }); return; }
     if (tool === 'pick') { void pickColor(at); return; }
@@ -229,7 +250,21 @@ export default function App() {
     const at = coords(e); setCursor(at); setCtrl(e.ctrlKey || e.metaKey);
     const d = drag.current;
     if (!d) return;
-    if (d.kind === 'pan') {
+    if (d.kind === 'selection') {
+      d.end = at;
+      setMarquee({ start: d.start, end: at });
+      const left = Math.min(d.start.x, at.x), right = Math.max(d.start.x, at.x);
+      const top = Math.min(d.start.y, at.y), bottom = Math.max(d.start.y, at.y);
+      const inside = project.points.filter(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom).map(p => p.id);
+      setSelectedIds([...new Set([...d.ids!, ...inside])]);
+    } else if (d.kind === 'point') {
+      const originals = d.originals ?? [d.point!];
+      // Clamp the group as a whole, preserving relative spacing and Bézier handles.
+      const dx = clamp(at.x - d.start.x, -Math.min(...originals.map(p => p.x)), 1 - Math.max(...originals.map(p => p.x)));
+      const dy = clamp(at.y - d.start.y, -Math.min(...originals.map(p => p.y)), 1 - Math.max(...originals.map(p => p.y)));
+      const moved = new Map(originals.map(p => [p.id, movePoint(p, { x: p.x + dx, y: p.y + dy })]));
+      history.set(p => ({ ...p, points: p.points.map(point => moved.get(point.id) ?? point) }), false);
+    } else if (d.kind === 'pan') {
       const rect = svgRef.current!.getBoundingClientRect();
       setView({ x: clamp(d.view!.x - (e.clientX - d.start.x) / rect.width / zoom, 0, 1 - 1 / zoom), y: clamp(d.view!.y - (e.clientY - d.start.y) / rect.height / zoom, 0, 1 - 1 / zoom) });
     } else if (d.kind === 'anchor') {
@@ -252,7 +287,20 @@ export default function App() {
       }) }), false);
     }
   };
-  const stageUp = () => { if (drag.current) { drag.current = null; history.commit(); } };
+  const stageUp = () => {
+    const d = drag.current;
+    if (!d) return;
+    if (d.kind === 'selection' && Math.hypot((d.end!.x - d.start.x) * width, (d.end!.y - d.start.y) * height) * canvasScale * zoom < 3) {
+      const nearest = project.points.reduce<Point | null>((best, p) => {
+        const distance = (point: Point) => Math.hypot((point.x - d.start.x) * width, (point.y - d.start.y) * height);
+        return !best || distance(p) < distance(best) ? p : best;
+      }, null);
+      if (nearest && Math.hypot((nearest.x - d.start.x) * width, (nearest.y - d.start.y) * height) * canvasScale * zoom <= 12) {
+        setSelectedIds(d.ids!.includes(nearest.id) ? d.ids!.filter(id => id !== nearest.id) : [...d.ids!, nearest.id]);
+      }
+    }
+    setMarquee(null); drag.current = null; history.commit();
+  };
 
   const editPointValue = (point: Point, axis: 'x' | 'y', value: number) => {
     const position = positionAt(value + (axis === 'y' ? project.offset : 0), axis === 'x' ? project.xAxis : project.yAxis);
@@ -318,14 +366,14 @@ export default function App() {
       const control = currentPoint[handle] ?? (handle === 'incoming' ? curves[pointIndex - 1]?.c : curves[pointIndex]?.b);
       if (!control) return null;
       return <g key={handle}><line x1={currentPoint.x * width} y1={currentPoint.y * height} x2={control.x * width} y2={control.y * height} stroke="#8cb7ae" strokeWidth={1} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-        <circle cx={control.x * width} cy={control.y * height} r={4.5 / zoom / canvasScale} vectorEffect="non-scaling-stroke" className="bezier-handle" onPointerDown={e => capture(e, { kind: 'handle', id: currentPoint.id, handle, start: coords(e) })} data-testid={`handle-${handle}`} />
+        <circle cx={control.x * width} cy={control.y * height} r={4.5 / zoom / canvasScale} vectorEffect="non-scaling-stroke" className="bezier-handle" onPointerDown={e => { if (!e.shiftKey) capture(e, { kind: 'handle', id: currentPoint.id, handle, start: coords(e) }); }} data-testid={`handle-${handle}`} />
       </g>;
     })}
     {interactive && mode !== 'calibrate' && project.points.map((point, i) => <g key={point.id}>
       <circle cx={point.x * width} cy={point.y * height} r={12 / zoom / canvasScale} fill="transparent" className="point-hit" onPointerDown={e => pointDown(e, point)} onDoubleClick={e => {
         e.stopPropagation(); if (project.interpolation === 'bezier') update(p => ({ ...p, points: p.points.map(row => row.id === point.id ? { ...row, incoming: undefined, outgoing: undefined } : row) }));
       }} data-testid={`point-${i}`} />
-      <circle cx={point.x * width} cy={point.y * height} r={(selected === point.id ? 5 : 3.4) / zoom / canvasScale} fill={selected === point.id ? graphColors.curve : graphColors.background} stroke={graphColors.curve} strokeWidth={1.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      <circle cx={point.x * width} cy={point.y * height} r={(selectedSet.has(point.id) ? 5 : 3.4) / zoom / canvasScale} fill={selectedSet.has(point.id) ? graphColors.curve : graphColors.background} stroke={graphColors.curve} strokeWidth={1.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
     </g>)}
   </>;
 
@@ -390,7 +438,7 @@ export default function App() {
           <div className="toolbar-spacer" /><div className="tool-group history-tools">
             <button className="icon-button" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!history.canUndo} onClick={() => { cancelTrace(); history.undo(); }}><Undo2 size={16} /></button>
             <button className="icon-button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!history.canRedo} onClick={() => { cancelTrace(); history.redo(); }}><Redo2 size={16} /></button>
-            <button className="icon-button" aria-label="Delete selected point" title="Delete selected point" disabled={!currentPoint} onClick={removeSelected}><Trash2 size={15} /></button>
+            <button className="icon-button" aria-label="Delete selected point" title="Delete selected points" disabled={!selectedPoints.length} onClick={removeSelected}><Trash2 size={15} /></button>
           </div>
         </div>}
 
@@ -401,6 +449,7 @@ export default function App() {
             <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}`, '--canvas-ratio': width / height } as CSSProperties}>
               <svg ref={svgRef} className="graph-canvas" viewBox={viewBox} onPointerDown={stageDown} onPointerMove={stageMove} onPointerUp={stageUp} onPointerCancel={stageUp} onLostPointerCapture={stageUp} onPointerLeave={() => { if (!drag.current) setCursor(null); }} aria-label="Graph drawing canvas" data-testid="graph-canvas">
                 {renderGraph(true)}
+                {marquee && <rect data-testid="selection-box" x={Math.min(marquee.start.x, marquee.end.x) * width} y={Math.min(marquee.start.y, marquee.end.y) * height} width={Math.abs(marquee.end.x - marquee.start.x) * width} height={Math.abs(marquee.end.y - marquee.start.y) * height} fill={graphColors.curve} fillOpacity={0.12} stroke={graphColors.curve} strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
               </svg>
               {!project.image && !project.points.length && <div className="empty-state"><ImagePlus size={29} strokeWidth={1.2} /><button onClick={() => imageInput.current?.click()}>Drop an image, or browse</button><span>PNG, JPG, WebP, AVIF, GIF, BMP</span><button className="empty-draw" onClick={() => { setMode('trace'); setTool('points'); svgRef.current?.focus(); notify('Click the canvas to add points.'); }}>Or start drawing</button></div>}
               {cursor && (loupeMode === 'always' || (loupeMode === 'ctrl' && ctrl)) && <div className="loupe" aria-label="Magnified cursor view">
@@ -410,14 +459,14 @@ export default function App() {
             </div>
             {proposal && <div className="trace-proposal"><span>{proposal.points.length} points · {proposal.confidence < 0.45 ? 'Check the match' : 'Trace preview'}</span><button onClick={() => { history.set(p => ({ ...p, points: proposal.points, interpolation: 'straight' })); setSelected(null); setProposal(null); notify('Trace applied. Points are editable.'); }}><Check size={15} />Apply</button><button aria-label="Discard trace" onClick={cancelTrace}><X size={16} /></button></div>}
           </div>
-          <div className="canvas-bottom"><span className="canvas-hint">{alignImage ? 'Drag the image to align it. Points stay fixed.' : mode === 'calibrate' ? 'Drag a reference line to match the image. Points stay fixed.' : mode === 'preview' ? 'Drag points to refine the curve.' : tool === 'pen' ? 'Click and drag for curves. Alt: independent handles.' : tool === 'pick' ? 'Click the line to sample its color.' : 'Click to add. Drag to move. Space: pan. Scroll: zoom.'}</span>
+          <div className="canvas-bottom"><span className="canvas-hint">{alignImage ? 'Drag the image to align it. Points stay fixed.' : mode === 'calibrate' ? 'Drag a reference line to match the image. Points stay fixed.' : mode === 'preview' ? 'Drag points to refine. Shift + drag: select a group.' : tool === 'pen' ? 'Click and drag for curves. Alt: independent handles.' : tool === 'pick' ? 'Click the line to sample its color.' : 'Click to add. Shift + drag: select. Drag selection to move.'}</span>
             <div className="zoom-controls"><button className="icon-button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => changeZoom(zoom / 1.25)}><Minus size={14} /></button><button className="zoom-value" title="Fit image" onClick={resetView}>{Math.round(zoom * 100)}%</button><button className="icon-button" aria-label="Zoom in" disabled={zoom >= 12} onClick={() => changeZoom(zoom * 1.25)}><Plus size={14} /></button></div>
           </div>
         </> : <div className="data-view">
           <div className="data-heading"><div><h1>Point values</h1><p>{project.points.length} points · {exportDensity === 'curve' ? `${exportCount} samples on export` : 'Anchor points on export'}</p></div><button className="quiet-button" onClick={() => { setMode('preview'); setTool('select'); }}><Crosshair size={14} />Edit on graph</button></div>
           {invalidAxes ? <div className="data-empty">Fix the axis references to view numeric values.<button className="text-button" onClick={() => setMode('calibrate')}>Edit axes</button></div> : !project.points.length ? <div className="data-empty">No points yet.<button className="text-button" onClick={() => setMode('trace')}>Draw a curve</button></div> : <>
             <div className="data-table-wrap"><table className="data-table"><thead><tr><th>#</th><th>{project.xAxis.label} {project.xAxis.unit && `(${project.xAxis.unit})`}</th><th>{project.yAxis.label} {project.yAxis.unit && `(${project.yAxis.unit})`}</th><th /></tr></thead><tbody>
-              {project.points.slice(page * 100, (page + 1) * 100).map((point, i) => <tr key={point.id} className={selected === point.id ? 'selected' : ''} onClick={() => setSelected(point.id)}>
+              {project.points.slice(page * 100, (page + 1) * 100).map((point, i) => <tr key={point.id} className={selectedSet.has(point.id) ? 'selected' : ''} onClick={() => setSelected(point.id)}>
                 <td>{page * 100 + i + 1}</td><td><NumberField label={`Point ${page * 100 + i + 1} X value`} value={valueAt(point.x, project.xAxis)} onChange={n => editPointValue(point, 'x', n)} /></td><td><NumberField label={`Point ${page * 100 + i + 1} Y value`} value={valueAt(point.y, project.yAxis) - project.offset} onChange={n => editPointValue(point, 'y', n)} /></td><td><button className="icon-button" aria-label={`Delete point ${page * 100 + i + 1}`} onClick={e => { e.stopPropagation(); update(p => ({ ...p, points: p.points.filter(row => row.id !== point.id) })); }}><Trash2 size={13} /></button></td>
               </tr>)}
             </tbody></table></div>
@@ -435,6 +484,7 @@ export default function App() {
           <div className="scale-note">Frequency: logarithmic. dB: linear.<br />dB is already a logarithmic unit.</div>
         </> : <>
           <Section title="Curve">
+            {selectedPoints.length > 1 && <div className="group-selection"><span>{selectedPoints.length} points selected</span><button className="text-button" onClick={() => setSelected(null)}>Clear</button></div>}
             <Field label="Interpolation"><select aria-label="Interpolation" value={project.interpolation} onChange={e => update(p => ({ ...p, interpolation: e.target.value as Project['interpolation'] }))}><option value="straight">Straight segments</option><option value="smooth">Smooth curve</option><option value="bezier">Bézier handles</option></select></Field>
             <Field label={`Subtract from ${project.yAxis.unit || 'Y'} values`} hint="Applied to values and exports; the trace stays in place."><NumberField label="Y offset" value={project.offset} onChange={offset => update(p => ({ ...p, offset }))} /></Field>
             {currentPoint && <div className="selected-point"><div className="section-heading"><h3>Point {project.points.indexOf(currentPoint) + 1}</h3><button className="icon-button" aria-label="Deselect point" onClick={() => setSelected(null)}><X size={13} /></button></div><div className="two-fields">
