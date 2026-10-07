@@ -279,18 +279,21 @@ export default function App() {
   };
   const tickLabel = (n: number) => Math.abs(n) >= 1000 ? `${Number((n / 1000).toPrecision(4))}k` : Number(n.toPrecision(4)).toString();
   const xTicks = ticks(project.xAxis), yTicks = ticks(project.yAxis);
+  const graphColors = theme === 'dark'
+    ? { background: '#19211c', grid: '#354238', text: '#adbeb0', title: '#c5d8ca', border: '#627868', curve: '#65ceb0' }
+    : { background: '#ffffff', grid: '#e0e5df', text: '#76827b', title: '#46564b', border: '#adb6b5', curve: '#137565' };
   const imageTransform = project.image ? `translate(${width / 2 + project.image.x * width} ${height / 2 + project.image.y * height}) rotate(${project.image.rotation}) scale(${project.image.scale}) translate(${-width / 2} ${-height / 2})` : '';
   const viewBox = `${view.x * width} ${view.y * height} ${width / zoom} ${height / zoom}`;
   const renderGraph = (interactive: boolean, grid = showGrid, image = showImage): ReactNode => <>
-    <rect width={width} height={height} fill="white" />
+    <rect className="graph-background" width={width} height={height} fill={graphColors.background} />
     {image && project.image && <image href={project.image.data} width={width} height={height} transform={imageTransform} />}
     {image && project.image && <rect width={width} height={height} fill="white" opacity={project.veil} />}
     {grid && mode !== 'calibrate' && <g className="plot-grid">
-      {xTicks.map(t => <g key={t.value}><line x1={t.position * width} x2={t.position * width} y1={plotBounds.top} y2={plotBounds.bottom} /><text x={t.position * width} y={plotBounds.bottom + 20} textAnchor="middle">{tickLabel(t.value)}</text></g>)}
-      {yTicks.map(t => <g key={t.value}><line y1={t.position * height} y2={t.position * height} x1={plotBounds.left} x2={plotBounds.right} /><text x={plotBounds.left - 10} y={t.position * height + 4} textAnchor="end">{tickLabel(t.value - project.offset)}</text></g>)}
-      <rect x={plotBounds.left} y={plotBounds.top} width={plotBounds.right - plotBounds.left} height={plotBounds.bottom - plotBounds.top} fill="none" stroke="#adb6b5" />
-      <text x={(plotBounds.left + plotBounds.right) / 2} y={Math.min(height - 5, plotBounds.bottom + 42)} textAnchor="middle" className="axis-title">{project.xAxis.label}{project.xAxis.unit && ` (${project.xAxis.unit})`}</text>
-      <text transform={`translate(${Math.max(14, plotBounds.left - 52)} ${(plotBounds.top + plotBounds.bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{project.yAxis.label}{project.yAxis.unit && ` (${project.yAxis.unit})`}</text>
+      {xTicks.map(t => <g key={t.value}><line style={{ stroke: graphColors.grid }} x1={t.position * width} x2={t.position * width} y1={plotBounds.top} y2={plotBounds.bottom} /><text style={{ fill: graphColors.text }} x={t.position * width} y={plotBounds.bottom + 20} textAnchor="middle">{tickLabel(t.value)}</text></g>)}
+      {yTicks.map(t => <g key={t.value}><line style={{ stroke: graphColors.grid }} y1={t.position * height} y2={t.position * height} x1={plotBounds.left} x2={plotBounds.right} /><text style={{ fill: graphColors.text }} x={plotBounds.left - 10} y={t.position * height + 4} textAnchor="end">{tickLabel(t.value - project.offset)}</text></g>)}
+      <rect x={plotBounds.left} y={plotBounds.top} width={plotBounds.right - plotBounds.left} height={plotBounds.bottom - plotBounds.top} fill="none" stroke={graphColors.border} />
+      <text style={{ fill: graphColors.title }} x={(plotBounds.left + plotBounds.right) / 2} y={Math.min(height - 5, plotBounds.bottom + 42)} textAnchor="middle" className="axis-title">{project.xAxis.label}{project.xAxis.unit && ` (${project.xAxis.unit})`}</text>
+      <text style={{ fill: graphColors.title }} transform={`translate(${Math.max(14, plotBounds.left - 52)} ${(plotBounds.top + plotBounds.bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{project.yAxis.label}{project.yAxis.unit && ` (${project.yAxis.unit})`}</text>
     </g>}
     {mode === 'calibrate' && <g className="calibration-lines">
       {(['xAxis', 'yAxis'] as const).flatMap(axis => sortedAnchors(project[axis]).map((a, index) => {
@@ -308,7 +311,7 @@ export default function App() {
         </g>;
       }))}
     </g>}
-    <path d={drawingPath} fill="none" stroke="#137565" strokeWidth={2.3} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />
+    <path d={drawingPath} fill="none" stroke={graphColors.curve} strokeWidth={2.3} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" pointerEvents="none" />
     {proposal && <path d={pathData(proposal.points, 'straight', width, height)} fill="none" stroke="#d07629" strokeWidth={2} strokeDasharray="6 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />}
     {interactive && project.interpolation === 'bezier' && currentPoint && mode !== 'calibrate' && (['incoming', 'outgoing'] as const).map(handle => {
       const pointIndex = project.points.indexOf(currentPoint), curves = segments(project.points, 'bezier');
@@ -322,7 +325,7 @@ export default function App() {
       <circle cx={point.x * width} cy={point.y * height} r={12 / zoom / canvasScale} fill="transparent" className="point-hit" onPointerDown={e => pointDown(e, point)} onDoubleClick={e => {
         e.stopPropagation(); if (project.interpolation === 'bezier') update(p => ({ ...p, points: p.points.map(row => row.id === point.id ? { ...row, incoming: undefined, outgoing: undefined } : row) }));
       }} data-testid={`point-${i}`} />
-      <circle cx={point.x * width} cy={point.y * height} r={(selected === point.id ? 5 : 3.4) / zoom / canvasScale} fill={selected === point.id ? '#137565' : 'white'} stroke="#137565" strokeWidth={1.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      <circle cx={point.x * width} cy={point.y * height} r={(selected === point.id ? 5 : 3.4) / zoom / canvasScale} fill={selected === point.id ? graphColors.curve : graphColors.background} stroke={graphColors.curve} strokeWidth={1.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
     </g>)}
   </>;
 

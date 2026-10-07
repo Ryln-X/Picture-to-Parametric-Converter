@@ -34,3 +34,12 @@
 [data-theme="dark"] :is(.inline-error,.footer-warning){color:#eda185}
 [data-theme="dark"] .trace-proposal span{color:#e3b080}
 [data-theme="dark"] .trace-proposal button{color:#a3d9b7}
+[data-theme="dark"] :is(.canvas-frame,.loupe){background:#19211c}
+[data-theme="dark"] .empty-state{background:#19211cf2;border-color:#46594b;color:#a6bfae}
+[data-theme="dark"] .empty-state button{color:#a3d9b7}
+[data-theme="dark"] :is(.empty-state span,.empty-state .empty-draw){color:#9bb29f}
+[data-theme="dark"] .loupe>span{background:#243329f0;color:#bed4c4}
+[data-theme="dark"] .bezier-handle{fill:#19211c;stroke:#9bd3c0}
+[data-theme="dark"] .calibration-lines rect{fill:#27322b}
+[data-theme="dark"] .calibration-lines text{fill:#e4ba9b}
+[data-theme="dark"] .reference-x text{fill:#a6d2d4}
