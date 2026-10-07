@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
-  id-token: write
 
 concurrency:
   group: github-pages
@@ -26,18 +25,28 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish static files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin gh-pages
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          touch dist/.nojekyll
+          if git cat-file -e origin/gh-pages:CNAME 2>/dev/null; then
+            git show origin/gh-pages:CNAME > dist/CNAME
+          fi
+          index_directory=$(mktemp -d)
+          trap 'rm -rf "$index_directory"' EXIT
+          export GIT_INDEX_FILE="$index_directory/index"
+          git read-tree --empty
+          git add --force dist
+          tree=$(git write-tree)
+          site_tree=$(git rev-parse "$tree:dist")
+          parent=$(git rev-parse origin/gh-pages)
+          commit=$(git commit-tree "$site_tree" -p "$parent" -m "Publish graph editor from ${GITHUB_SHA}")
+          git push origin "$commit:refs/heads/gh-pages"
+      - name: Request GitHub Pages build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/builds"

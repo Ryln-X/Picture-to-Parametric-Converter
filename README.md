@@ -62,9 +62,9 @@ Moving calibration references changes numeric values while keeping the drawn poi
 
 ### GitHub Pages
 
-The `Deploy to GitHub Pages` workflow builds and publishes the site on pushes to `main`. In the repository's **Settings → Pages**, select **GitHub Actions** as the source. If Pages is enabled after the first push, run **Actions → Deploy to GitHub Pages → Run workflow** once. Subsequent pushes publish automatically.
+The site is published from the generated `gh-pages` branch. The `Deploy to GitHub Pages` workflow tests and builds pushes to `main`, updates that branch, and explicitly requests a Pages build. This also works with the repository's Pages deployment policy, which permits `gh-pages`.
 
-The expected address for this repository is `https://ryln-x.github.io/Picture-to-Parametric-Converter/`. A workflow file alone does not enable Pages; the repository setting must also be enabled.
+The live address is `https://ryln-x.github.io/Picture-to-Parametric-Converter/`. In **Settings → Pages**, keep **Deploy from a branch**, **gh-pages**, and **/ (root)** as the source. No additional secrets or paid services are needed. A custom domain can be configured later; the workflow preserves an existing `CNAME` file.
 
 ### Other static hosts
 
