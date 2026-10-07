@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { ArrowDownToLine, Check, ChevronDown, Crosshair, FileInput, FolderOpen, Hand, ImagePlus, Minus, MousePointer2, PenTool, Plus, Redo2, RotateCcw, Save, ScanLine, Trash2, Undo2, X, ZoomIn } from 'lucide-react';
+import { ArrowDownToLine, Check, ChevronDown, Crosshair, FileInput, FolderOpen, Hand, ImagePlus, Minus, Moon, MousePointer2, PenTool, Plus, Redo2, RotateCcw, Save, ScanLine, Sun, Trash2, Undo2, X } from 'lucide-react';
 import { AxisEditor, Field, NumberField, Section } from './components';
 import { clamp, defaultProject, exportRows, formatValue, insertPoint, moveAnchor, movePoint, parseData, pathData, positionAt, segments, sortedAnchors, uid, validateProject, valueAt, axisError, type Point, type Project, type XY } from './model';
 import { decodedImage, download, loadImage } from './io';
@@ -12,6 +12,13 @@ type Drag = { kind: 'point' | 'pen' | 'handle' | 'anchor' | 'pan' | 'image'; id?
 const imageAccept = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif';
 
 export default function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('graph-editor-theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch { /* Storage may be unavailable in private browsing. */ }
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const history = useHistory(defaultProject()), project = history.value;
   const [mode, setMode] = useState<Mode>('trace'), [tool, setTool] = useState<Tool>('points');
   const [selected, setSelected] = useState<string | null>(null), [autoInsert, setAutoInsert] = useState(true);
@@ -44,6 +51,12 @@ export default function App() {
     if (!selected) return;
     update(p => ({ ...p, points: p.points.filter(point => point.id !== selected) })); setSelected(null);
   };
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('graph-editor-theme', theme); }
+    catch { /* Theme switching still works when storage is unavailable. */ }
+  }, [theme]);
 
   useEffect(() => {
     const editable = (target: EventTarget | null) => target instanceof HTMLElement && !!target.closest('input,textarea,select,[contenteditable="true"]');
@@ -357,7 +370,7 @@ export default function App() {
           <button onClick={() => { setResetConfirm(true); document.querySelector('.file-menu')?.removeAttribute('open'); }}><RotateCcw size={14} /> New graph</button>
         </div></details>
       </div>
-      <div className="header-right"><span className="privacy-note"><span className="status-dot" /> Local processing</span><button className="quiet-button export-shortcut" onClick={() => { setMode('data'); }}><ArrowDownToLine size={16} /> Export</button></div>
+      <div className="header-right"><button className="quiet-button theme-toggle" aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'} title={theme === 'light' ? 'Dark theme' : 'Light theme'} onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}</button><button className="quiet-button export-shortcut" onClick={() => { setMode('data'); }}><ArrowDownToLine size={16} /> Export</button></div>
     </header>
 
     <div className="editor-layout">
